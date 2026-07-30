@@ -59,4 +59,16 @@ describe('parseEvent', () => {
     const event = parseEvent(UNRECOGNIZED_TYPE_LINE);
     expect(event.type).toBe('warning');
   });
+
+  it('handles assistant message where content is a string instead of an array (no throw)', () => {
+    const line = '{"type":"assistant","message":{"content":"not an array"}}';
+    const event = parseEvent(line);
+    expect(event.type).toBe('warning');
+  });
+
+  it('handles content array with null elements (no throw)', () => {
+    const line = '{"type":"assistant","message":{"content":[null,{"type":"other_type"}]}}';
+    const event = parseEvent(line);
+    expect(event.type).toBe('warning');
+  });
 });

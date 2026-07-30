@@ -37,8 +37,10 @@ export function parseEvent(line: string): ClaudeEvent {
 
     case 'assistant': {
       const message = obj.message as Record<string, unknown> | undefined;
-      const content = message?.content as Array<Record<string, unknown>> | undefined;
-      const toolUse = content?.find((block) => block.type === 'tool_use');
+      const content = message?.content as unknown;
+      const toolUse = Array.isArray(content)
+        ? content.find((block) => block?.type === 'tool_use')
+        : undefined;
       if (toolUse && typeof toolUse.id === 'string' && typeof toolUse.name === 'string') {
         return {
           type: 'tool_use',
@@ -52,8 +54,10 @@ export function parseEvent(line: string): ClaudeEvent {
 
     case 'user': {
       const message = obj.message as Record<string, unknown> | undefined;
-      const content = message?.content as Array<Record<string, unknown>> | undefined;
-      const toolResult = content?.find((block) => block.type === 'tool_result');
+      const content = message?.content as unknown;
+      const toolResult = Array.isArray(content)
+        ? content.find((block) => block?.type === 'tool_result')
+        : undefined;
       if (toolResult && typeof toolResult.tool_use_id === 'string') {
         return {
           type: 'tool_result',
