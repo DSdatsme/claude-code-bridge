@@ -24,4 +24,10 @@ describe('checkClaudeCode', () => {
     expect(result.version).toBeUndefined();
     expect(result.warning).toMatch(/could not parse/i);
   });
+
+  it('takes the last version-like match to avoid tool-chain noise', async () => {
+    const execFn = async () => ({ stdout: 'npm notice 10.2.3 -> 10.5.0\n2.4.1 (Claude Code)\n' });
+    const result = await checkClaudeCode({ execFn });
+    expect(result).toEqual({ installed: true, version: '2.4.1' });
+  });
 });

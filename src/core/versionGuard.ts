@@ -32,13 +32,18 @@ export async function checkClaudeCode(
     };
   }
 
-  const match = stdout.match(/(\d+\.\d+\.\d+)/);
-  if (!match) {
+  // NOTE: Take the LAST version-like match, not the first, to avoid mismatches with
+  // tool-chain noise (npm update notices, deprecation warnings) that may appear before
+  // the CLI's own version string. This remains a best-effort heuristic pending real
+  // captured `claude --version` output for verification.
+  const matches = [...stdout.matchAll(/(\d+\.\d+\.\d+)/g)];
+  if (matches.length === 0) {
     return {
       installed: true,
       warning: `Could not parse a version number from "${binaryPath} --version" output: ${stdout.trim()}`,
     };
   }
 
-  return { installed: true, version: match[1] };
+  const lastMatch = matches[matches.length - 1];
+  return { installed: true, version: lastMatch[1] };
 }
