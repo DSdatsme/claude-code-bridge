@@ -94,4 +94,21 @@ describe('startClaudeProcess', () => {
     const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
     await expect(handle.result).rejects.toMatchObject({ partialText: 'partial' });
   });
+
+  it('rejects promptly with ClaudeProcessError when stdout is null (no hang)', async () => {
+    const spawnFn: SpawnFn = () => {
+      const emitter = new EventEmitter() as unknown as ChildProcessLike;
+      Object.assign(emitter, { stdout: null, stderr: Readable.from([], { objectMode: false }) });
+      return emitter;
+    };
+
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+    await expect(handle.result).rejects.toThrow(/no stdout stream/);
+
+    const events = [];
+    for await (const event of handle.events) {
+      events.push(event);
+    }
+    expect(events).toEqual([]);
+  });
 });

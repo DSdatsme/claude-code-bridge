@@ -100,6 +100,8 @@ export function startClaudeProcess(
         queue.finish();
       }
     });
+  } else {
+    fail(new ClaudeProcessError('Claude process produced no stdout stream', partialText));
   }
 
   return { events: queue, result };
