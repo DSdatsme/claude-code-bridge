@@ -1,12 +1,24 @@
 import type { ClaudeCodeOptions } from './types.js';
 
+/**
+ * Builds the argv for a `claude` invocation.
+ *
+ * The prompt is deliberately NOT part of argv. `-p`/`--print` is a boolean flag
+ * in the CLI, so a prompt passed as a positional argument is parsed as an
+ * *option* whenever it begins with "-" (verified against Claude Code 2.1.222:
+ * `claude -p --some-flag` reports `error: unknown option '--some-flag'`).
+ * Since prompts routinely come from untrusted input (see the /next route
+ * handler), that would let a caller inject arbitrary CLI flags - including
+ * `--bare`, which would silently break subscription-credential reading, and
+ * `--dangerously-skip-permissions`. The prompt is written to the child's stdin
+ * instead; see `startClaudeProcess`.
+ */
 export function buildClaudeArgs(
-  prompt: string,
   options: ClaudeCodeOptions,
   resumeSessionId?: string
 ): string[] {
   const args: string[] = [
-    '-p', prompt,
+    '-p',
     '--output-format', 'stream-json',
     '--verbose',
     '--include-partial-messages',

@@ -7,6 +7,7 @@ import { ClaudeNotFoundError, ClaudeAuthError, ClaudeProcessError } from './erro
 import type { ClaudeCodeOptions, ClaudeEvent, ResultEvent } from './types.js';
 
 export interface ChildProcessLike {
+  stdin: NodeJS.WritableStream | null;
   stdout: NodeJS.ReadableStream | null;
   stderr: NodeJS.ReadableStream | null;
   on(event: 'error', listener: (err: NodeJS.ErrnoException) => void): void;
@@ -33,8 +34,21 @@ export function startClaudeProcess(
   spawnFn: SpawnFn = nodeSpawn
 ): ClaudeProcessHandle {
   const binaryPath = options.binaryPath ?? 'claude';
-  const args = buildClaudeArgs(prompt, options, resumeSessionId);
+  const args = buildClaudeArgs(options, resumeSessionId);
   const child = spawnFn(binaryPath, args, { cwd: options.cwd });
+
+  // The prompt goes over stdin, never argv (see buildClaudeArgs). Ending stdin
+  // immediately is also what keeps the CLI responsive: its input handling waits
+  // up to 3s for stdin data whenever stdin is not a TTY - which is always the
+  // case for a spawned child - so leaving the pipe open costs ~3s per turn.
+  if (child.stdin) {
+    // A child that dies before reading stdin makes the write fail with EPIPE.
+    // That failure is already reported through 'error'/'close'; don't let it
+    // surface as an unhandled stream error.
+    child.stdin.on('error', () => {});
+    child.stdin.write(prompt);
+    child.stdin.end();
+  }
 
   const queue = new AsyncEventQueue<ClaudeEvent>();
   let partialText = '';

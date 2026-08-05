@@ -3,9 +3,9 @@ import { buildClaudeArgs } from '../../src/core/cliArgs.js';
 
 describe('buildClaudeArgs', () => {
   it('builds the baseline stream-json invocation with no options', () => {
-    const args = buildClaudeArgs('hello', {});
+    const args = buildClaudeArgs({});
     expect(args).toEqual([
-      '-p', 'hello',
+      '-p',
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
@@ -13,18 +13,25 @@ describe('buildClaudeArgs', () => {
   });
 
   it('never includes --bare', () => {
-    const args = buildClaudeArgs('hello', {});
+    const args = buildClaudeArgs({});
     expect(args).not.toContain('--bare');
   });
 
+  it('never carries the prompt in argv, so prompt text cannot become a flag', () => {
+    // The prompt is delivered over stdin instead; `-p` is a boolean flag, so a
+    // positional prompt beginning with "-" would be parsed as an option.
+    const args = buildClaudeArgs({});
+    expect(args.filter((arg) => !arg.startsWith('-'))).toEqual(['stream-json']);
+  });
+
   it('adds --resume when a session id is passed', () => {
-    const args = buildClaudeArgs('hello', {}, 'sess_123');
+    const args = buildClaudeArgs({}, 'sess_123');
     expect(args).toContain('--resume');
     expect(args[args.indexOf('--resume') + 1]).toBe('sess_123');
   });
 
   it('maps permission mode, tool lists, prompts, mcp config, and model', () => {
-    const args = buildClaudeArgs('hello', {
+    const args = buildClaudeArgs({
       permissionMode: 'acceptEdits',
       allowedTools: ['Read', 'Edit'],
       disallowedTools: ['Bash'],

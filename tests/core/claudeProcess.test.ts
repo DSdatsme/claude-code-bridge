@@ -1,28 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { EventEmitter } from 'node:events';
-import { Readable } from 'node:stream';
-import { startClaudeProcess, type ChildProcessLike, type SpawnFn } from '../../src/core/claudeProcess.js';
-
-function fakeChild(opts: {
-  lines?: string[];
-  stderr?: string;
-  emitErrorCode?: string;
-}): ChildProcessLike {
-  const emitter = new EventEmitter() as unknown as ChildProcessLike;
-  const stdout = Readable.from(opts.lines ? opts.lines.map((l) => l + '\n') : [], { objectMode: false });
-  const stderr = Readable.from(opts.stderr ? [opts.stderr] : [], { objectMode: false });
-
-  Object.assign(emitter, { stdout, stderr });
-
-  if (opts.emitErrorCode) {
-    queueMicrotask(() => {
-      const err = Object.assign(new Error('spawn failed'), { code: opts.emitErrorCode });
-      (emitter as unknown as EventEmitter).emit('error', err);
-    });
-  }
-
-  return emitter;
-}
+import { startClaudeProcess, type SpawnFn } from '../../src/core/claudeProcess.js';
+import { fakeChild } from '../fixtures/fakeChild.js';
 
 describe('startClaudeProcess', () => {
   it('streams parsed events and resolves the result', async () => {
@@ -70,6 +48,72 @@ describe('startClaudeProcess', () => {
     });
   });
 
+  it('writes the prompt to stdin and ends it, instead of putting it in argv', async () => {
+    const children: ReturnType<typeof fakeChild>[] = [];
+    const argvs: string[][] = [];
+    const spawnFn: SpawnFn = (_command, args) => {
+      argvs.push(args);
+      const child = fakeChild({
+        lines: [
+          '{"type":"result","subtype":"success","session_id":"sess_3","total_cost_usd":0,"result":"ok"}',
+        ],
+      });
+      children.push(child);
+      return child;
+    };
+
+    const handle = startClaudeProcess('summarize the README', {}, undefined, spawnFn);
+    await handle.result;
+
+    expect(children[0].stdinChunks.join('')).toBe('summarize the README');
+    expect(children[0].stdinEnded()).toBe(true);
+    expect(argvs[0]).not.toContain('summarize the README');
+    expect(argvs[0]).toEqual([
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--include-partial-messages',
+    ]);
+  });
+
+  it('keeps a prompt that begins with a dash out of argv so the CLI cannot parse it as a flag', async () => {
+    const argvs: string[][] = [];
+    const children: ReturnType<typeof fakeChild>[] = [];
+    const spawnFn: SpawnFn = (_command, args) => {
+      argvs.push(args);
+      const child = fakeChild({
+        lines: [
+          '{"type":"result","subtype":"success","session_id":"sess_4","total_cost_usd":0,"result":"ok"}',
+        ],
+      });
+      children.push(child);
+      return child;
+    };
+
+    for (const hostilePrompt of [
+      '--dangerously-skip-permissions',
+      '--bare',
+      '--permission-mode=bypassPermissions',
+    ]) {
+      const handle = startClaudeProcess(hostilePrompt, {}, undefined, spawnFn);
+      await handle.result;
+    }
+
+    for (const argv of argvs) {
+      expect(argv).not.toContain('--dangerously-skip-permissions');
+      expect(argv).not.toContain('--bare');
+      expect(argv).not.toContain('--permission-mode=bypassPermissions');
+    }
+    // The hostile text still reaches Claude - as a prompt, over stdin, where it
+    // is data rather than argv.
+    expect(children.map((c) => c.stdinChunks.join(''))).toEqual([
+      '--dangerously-skip-permissions',
+      '--bare',
+      '--permission-mode=bypassPermissions',
+    ]);
+  });
+
   it('rejects with ClaudeNotFoundError when the binary is missing', async () => {
     const spawnFn: SpawnFn = () => fakeChild({ emitErrorCode: 'ENOENT' });
     const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
@@ -96,19 +140,9 @@ describe('startClaudeProcess', () => {
   });
 
   it('rejects promptly with ClaudeProcessError when stdout is null (no hang)', async () => {
-    const spawnFn: SpawnFn = () => {
-      const emitter = new EventEmitter() as unknown as ChildProcessLike;
-      Object.assign(emitter, { stdout: null, stderr: Readable.from([], { objectMode: false }) });
-      return emitter;
-    };
+    const spawnFn: SpawnFn = () => fakeChild({ noStdout: true });
 
     const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
     await expect(handle.result).rejects.toThrow(/no stdout stream/);
-
-    const events = [];
-    for await (const event of handle.events) {
-      events.push(event);
-    }
-    expect(events).toEqual([]);
   });
 });

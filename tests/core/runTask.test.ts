@@ -1,17 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { EventEmitter } from 'node:events';
-import { Readable } from 'node:stream';
 import { runTask } from '../../src/core/runTask.js';
-import type { ChildProcessLike, SpawnFn } from '../../src/core/claudeProcess.js';
+import type { SpawnFn } from '../../src/core/claudeProcess.js';
+import { fakeChild as makeFakeChild } from '../fixtures/fakeChild.js';
 
-function fakeChild(lines: string[]): ChildProcessLike {
-  const emitter = new EventEmitter() as unknown as ChildProcessLike;
-  Object.assign(emitter, {
-    stdout: Readable.from(lines.map((l) => l + '\n')),
-    stderr: Readable.from([]),
-  });
-  return emitter;
-}
+const fakeChild = (lines: string[]) => makeFakeChild({ lines });
 
 describe('runTask', () => {
   it('resolves text, sessionId, costUsd, and collected tool calls', async () => {
