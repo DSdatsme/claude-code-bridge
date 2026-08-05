@@ -102,6 +102,9 @@ export function startClaudeProcess(
     rl.on('line', (line: string) => {
       if (!line.trim()) return;
       const event = parseEvent(line);
+      // Recognised-but-unmodelled lines (partial-message plumbing, routine
+      // system notices) parse to undefined and are simply not forwarded.
+      if (!event) return;
       if (event.type === 'text_delta') {
         partialText += event.text;
       }

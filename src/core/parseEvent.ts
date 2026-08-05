@@ -1,6 +1,29 @@
 import type { ClaudeEvent } from './types.js';
 
-export function parseEvent(line: string): ClaudeEvent {
+/**
+ * Content block types that carry no information this library models, but which
+ * are entirely expected in real output. Assistant messages made up only of
+ * these are skipped rather than reported: with --include-partial-messages the
+ * text has already been delivered as `text_delta` events, so re-emitting the
+ * completed message would double it.
+ */
+const IGNORABLE_BLOCK_TYPES = new Set(['text', 'thinking', 'redacted_thinking']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Parses one NDJSON line of `--output-format stream-json` output.
+ *
+ * Returns `undefined` for lines that are recognised but carry nothing this
+ * library models - the CLI emits a great deal of such plumbing (partial-message
+ * bookkeeping, hook notifications, echoed user turns). Those used to be reported
+ * as warnings, which meant a normal turn produced a stream of spurious warning
+ * events, each carrying the full raw line. Genuinely unrecognised or malformed
+ * input still produces a warning: it is never silently swallowed.
+ */
+export function parseEvent(line: string): ClaudeEvent | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(line);
@@ -8,23 +31,34 @@ export function parseEvent(line: string): ClaudeEvent {
     return { type: 'warning', message: 'Received a non-JSON line from Claude Code', raw: line };
   }
 
-  if (typeof raw !== 'object' || raw === null || !('type' in raw)) {
+  if (!isRecord(raw) || !('type' in raw)) {
     return { type: 'warning', message: 'Received a JSON line with no "type" field', raw: line };
   }
 
-  const obj = raw as Record<string, unknown>;
+  const obj = raw;
 
   switch (obj.type) {
     case 'system': {
       if (obj.subtype === 'init' && typeof obj.session_id === 'string') {
         return { type: 'session_init', sessionId: obj.session_id };
       }
-      return { type: 'warning', message: 'Unrecognized system message shape', raw: line };
+      // The CLI has many system subtypes (hook_started, api_retry,
+      // compact_boundary, background_tasks, ...). Only the ones that report a
+      // problem are worth surfacing; the rest are routine chatter.
+      const subtype = typeof obj.subtype === 'string' ? obj.subtype : undefined;
+      if (subtype && /error|fail|denied/i.test(subtype)) {
+        return {
+          type: 'warning',
+          message: `Claude Code reported a problem (system/${subtype})`,
+          raw: line,
+        };
+      }
+      return undefined;
     }
 
     case 'stream_event': {
-      const event = obj.event as Record<string, unknown> | undefined;
-      const delta = event?.delta as Record<string, unknown> | undefined;
+      const event = isRecord(obj.event) ? obj.event : undefined;
+      const delta = isRecord(event?.delta) ? event.delta : undefined;
       if (
         event?.type === 'content_block_delta' &&
         delta?.type === 'text_delta' &&
@@ -32,16 +66,20 @@ export function parseEvent(line: string): ClaudeEvent {
       ) {
         return { type: 'text_delta', text: delta.text };
       }
-      return { type: 'warning', message: 'Unrecognized stream_event shape', raw: line };
+      // message_start/stop, content_block_start/stop, input_json_delta,
+      // thinking_delta and friends: expected partial-message plumbing.
+      return undefined;
     }
 
     case 'assistant': {
-      const message = obj.message as Record<string, unknown> | undefined;
-      const content = message?.content as unknown;
-      const toolUse = Array.isArray(content)
-        ? content.find((block) => block?.type === 'tool_use')
-        : undefined;
-      if (toolUse && typeof toolUse.id === 'string' && typeof toolUse.name === 'string') {
+      const message = isRecord(obj.message) ? obj.message : undefined;
+      const content = message?.content;
+      if (!Array.isArray(content)) {
+        return { type: 'warning', message: 'Unrecognized assistant message shape', raw: line };
+      }
+
+      const toolUse = content.find((block) => isRecord(block) && block.type === 'tool_use');
+      if (isRecord(toolUse) && typeof toolUse.id === 'string' && typeof toolUse.name === 'string') {
         return {
           type: 'tool_use',
           toolUseId: toolUse.id,
@@ -49,16 +87,28 @@ export function parseEvent(line: string): ClaudeEvent {
           input: toolUse.input,
         };
       }
+
+      if (
+        content.length > 0 &&
+        content.every(
+          (block) => isRecord(block) && typeof block.type === 'string' && IGNORABLE_BLOCK_TYPES.has(block.type)
+        )
+      ) {
+        return undefined;
+      }
+
       return { type: 'warning', message: 'Unrecognized assistant message shape', raw: line };
     }
 
     case 'user': {
-      const message = obj.message as Record<string, unknown> | undefined;
-      const content = message?.content as unknown;
-      const toolResult = Array.isArray(content)
-        ? content.find((block) => block?.type === 'tool_result')
-        : undefined;
-      if (toolResult && typeof toolResult.tool_use_id === 'string') {
+      const message = isRecord(obj.message) ? obj.message : undefined;
+      const content = message?.content;
+      if (!Array.isArray(content)) {
+        return { type: 'warning', message: 'Unrecognized user message shape', raw: line };
+      }
+
+      const toolResult = content.find((block) => isRecord(block) && block.type === 'tool_result');
+      if (isRecord(toolResult) && typeof toolResult.tool_use_id === 'string') {
         return {
           type: 'tool_result',
           toolUseId: toolResult.tool_use_id,
@@ -66,6 +116,17 @@ export function parseEvent(line: string): ClaudeEvent {
           isError: Boolean(toolResult.is_error),
         };
       }
+
+      // The CLI echoes the user's own turn back; nothing to report.
+      if (
+        content.length > 0 &&
+        content.every(
+          (block) => isRecord(block) && typeof block.type === 'string' && IGNORABLE_BLOCK_TYPES.has(block.type)
+        )
+      ) {
+        return undefined;
+      }
+
       return { type: 'warning', message: 'Unrecognized user message shape', raw: line };
     }
 

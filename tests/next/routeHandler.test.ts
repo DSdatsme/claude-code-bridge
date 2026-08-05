@@ -37,6 +37,50 @@ describe('createClaudeRouteHandler', () => {
     );
   });
 
+  it('strips warning.raw so raw CLI output never reaches the browser', async () => {
+    async function* fakeEvents(): AsyncIterable<ClaudeEvent> {
+      yield {
+        type: 'warning',
+        message: 'Unrecognized system message shape',
+        raw: '{"secret":"contents of /etc/passwd surfaced by a tool"}',
+      };
+    }
+
+    const handler = createClaudeRouteHandler(() => ({ send: () => fakeEvents() }));
+    const response = await handler(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'hello' }),
+      })
+    );
+
+    const body = await readAllChunks(response);
+    expect(body).toContain('Unrecognized system message shape');
+    expect(body).not.toContain('etc/passwd');
+    expect(body).not.toContain('"raw"');
+  });
+
+  it('sends a typed error event when the event stream fails', async () => {
+    async function* failingEvents(): AsyncIterable<ClaudeEvent> {
+      yield { type: 'text_delta', text: 'partial' };
+      throw Object.assign(new Error('credentials expired'), { name: 'ClaudeAuthError' });
+    }
+
+    const handler = createClaudeRouteHandler(() => ({ send: () => failingEvents() }));
+    const response = await handler(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'hello' }),
+      })
+    );
+
+    const body = await readAllChunks(response);
+    expect(body).toContain(`data: ${JSON.stringify({ type: 'text_delta', text: 'partial' })}\n\n`);
+    expect(body).toContain(
+      `data: ${JSON.stringify({ type: 'error', name: 'ClaudeAuthError', message: 'credentials expired' })}\n\n`
+    );
+  });
+
   it('returns a 400 response when the request body has no prompt', async () => {
     const handler = createClaudeRouteHandler(() => ({
       send: async function* () {},
