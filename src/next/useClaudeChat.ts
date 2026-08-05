@@ -17,6 +17,37 @@ export interface UseClaudeChatResult {
   sendMessage: (text: string) => Promise<void>;
 }
 
+/**
+ * An error reported by the server for a chat turn. `name` mirrors the
+ * server-side error class (e.g. "ClaudeAuthError") so a UI can special-case it.
+ */
+export class ClaudeChatError extends Error {
+  public readonly serverErrorName: string;
+
+  constructor(message: string, serverErrorName: string) {
+    super(message);
+    this.name = 'ClaudeChatError';
+    this.serverErrorName = serverErrorName;
+  }
+}
+
+async function describeFailedResponse(response: Response): Promise<string> {
+  let detail = '';
+  try {
+    const text = await response.text();
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      detail = typeof parsed.error === 'string' ? parsed.error : text;
+    } catch {
+      detail = text;
+    }
+  } catch {
+    // body unreadable; the status alone is still worth reporting
+  }
+  const suffix = detail.trim() ? `: ${detail.trim().slice(0, 500)}` : '';
+  return `Chat request failed with HTTP ${response.status}${suffix}`;
+}
+
 export function useClaudeChat(options: UseClaudeChatOptions): UseClaudeChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -34,6 +65,13 @@ export function useClaudeChat(options: UseClaudeChatOptions): UseClaudeChatResul
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: text }),
         });
+
+        // A non-2xx response is a plain JSON or HTML error, not an SSE stream.
+        // Parsing it as SSE would yield no events and leave the caller with a
+        // blank assistant message and no error at all.
+        if (!response.ok) {
+          throw new Error(await describeFailedResponse(response));
+        }
 
         if (!response.body) {
           throw new Error('Response had no readable body');
@@ -63,11 +101,24 @@ export function useClaudeChat(options: UseClaudeChatOptions): UseClaudeChatResul
                 next[next.length - 1] = { ...last, content: last.content + event.text };
                 return next;
               });
+            } else if (event.type === 'error') {
+              // The turn failed server-side (spawn failure, expired credentials,
+              // mid-stream crash). Surface it instead of ending the stream
+              // silently.
+              throw new ClaudeChatError(event.message, event.name);
             }
           }
         }
       } catch (err) {
         setError(err instanceof Error ? err : new Error(String(err)));
+        // Don't leave an empty assistant bubble behind when nothing streamed.
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === 'assistant' && last.content === '') {
+            return prev.slice(0, -1);
+          }
+          return prev;
+        });
       } finally {
         setIsStreaming(false);
       }

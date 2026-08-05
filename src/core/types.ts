@@ -32,7 +32,24 @@ export interface SessionInitEvent {
 export interface WarningEvent {
   type: 'warning';
   message: string;
+  /**
+   * The raw line this warning came from, for server-side diagnosis. It can
+   * contain arbitrary CLI output, so it is stripped before the event is
+   * forwarded to a browser - see the /next route handler.
+   */
   raw: string;
+}
+
+/**
+ * A turn that ended in failure. Produced at the transport boundary (the SSE
+ * route handler) so that an error raised inside the process layer reaches a
+ * browser as a typed event rather than as a silently truncated stream.
+ */
+export interface ClaudeErrorEvent {
+  type: 'error';
+  /** Error class name, e.g. "ClaudeAuthError", so consumers can branch on it. */
+  name: string;
+  message: string;
 }
 
 export type ClaudeEvent =
@@ -41,7 +58,8 @@ export type ClaudeEvent =
   | ToolResultEvent
   | ResultEvent
   | SessionInitEvent
-  | WarningEvent;
+  | WarningEvent
+  | ClaudeErrorEvent;
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 

@@ -62,11 +62,21 @@ export function startClaudeProcess(
     rejectResult = reject;
   });
 
+  // Safety net: a caller who only iterates `events` (the shape `SessionLike`
+  // models) never attaches a handler to `result`, and an unhandled rejection
+  // terminates the host process on Node >= 15. Attaching a no-op handler here
+  // does not swallow anything - callers who do await or .catch() the same
+  // promise still see the real rejection, because every handler on a promise
+  // runs. The error also reaches event consumers via queue.fail() below.
+  result.catch(() => {});
+
   function fail(error: Error): void {
     if (settled) return;
     settled = true;
     rejectResult(error);
-    queue.finish();
+    // fail(), not finish(): finishing would complete the iteration normally and
+    // the failure would never reach anyone consuming only `events`.
+    queue.fail(error);
   }
 
   child.on('error', (err: NodeJS.ErrnoException) => {

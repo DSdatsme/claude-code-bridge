@@ -145,4 +145,70 @@ describe('startClaudeProcess', () => {
     const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
     await expect(handle.result).rejects.toThrow(/no stdout stream/);
   });
+
+  it('surfaces a failure through `events`, not only through `result`', async () => {
+    // Without this, a consumer of `events` alone - which is exactly what
+    // ClaudeSession.send() hands to the SSE route handler - sees the iteration
+    // complete normally and never learns that anything went wrong.
+    const spawnFn: SpawnFn = () => fakeChild({ emitErrorCode: 'ENOENT' });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    await expect(
+      (async () => {
+        for await (const _ of handle.events) {
+          // drain
+        }
+      })()
+    ).rejects.toThrow(/Could not find/);
+  });
+
+  it('delivers partial events before surfacing a mid-stream failure through `events`', async () => {
+    const spawnFn: SpawnFn = () =>
+      fakeChild({
+        lines: [
+          '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}}',
+        ],
+        stderr: 'unexpected crash',
+      });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const event of handle.events) {
+          seen.push(event.type);
+        }
+      })()
+    ).rejects.toThrow(/exited without a result/);
+    expect(seen).toEqual(['text_delta']);
+  });
+
+  it('does not produce an unhandled rejection when only `events` is consumed', async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+
+    try {
+      const spawnFn: SpawnFn = () => fakeChild({ emitErrorCode: 'ENOENT' });
+      const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+      // Consume `events` and swallow its error, never touching `result`.
+      await (async () => {
+        try {
+          for await (const _ of handle.events) {
+            // drain
+          }
+        } catch {
+          // caller handled the stream error and does not care about `result`
+        }
+      })();
+
+      // Give the microtask queue and one macrotask turn a chance to report an
+      // unhandled rejection on `result`, which is what used to kill the process.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+  });
 });

@@ -68,6 +68,58 @@ describe('AsyncEventQueue', () => {
     expect(result2).toEqual({ value: undefined, done: true });
   });
 
+  it('rejects a pending next() call when fail() is called', async () => {
+    const queue = new AsyncEventQueue<number>();
+    const iterator = queue[Symbol.asyncIterator]();
+
+    const nextPromise = iterator.next();
+    queue.fail(new Error('process died'));
+
+    await expect(nextPromise).rejects.toThrow('process died');
+  });
+
+  it('rejects a later next() call when fail() was called earlier', async () => {
+    const queue = new AsyncEventQueue<number>();
+    queue.fail(new Error('process died'));
+
+    const iterator = queue[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toThrow('process died');
+  });
+
+  it('delivers already-buffered values before surfacing the failure', async () => {
+    const queue = new AsyncEventQueue<number>();
+    queue.push(1);
+    queue.push(2);
+    queue.fail(new Error('crashed mid-stream'));
+
+    const seen: number[] = [];
+    await expect(
+      (async () => {
+        for await (const value of queue) {
+          seen.push(value);
+        }
+      })()
+    ).rejects.toThrow('crashed mid-stream');
+    expect(seen).toEqual([1, 2]);
+  });
+
+  it('makes `for await` throw rather than completing quietly', async () => {
+    const queue = new AsyncEventQueue<number>();
+    let completedNormally = false;
+
+    const consume = (async () => {
+      for await (const _ of queue) {
+        // no-op
+      }
+      completedNormally = true;
+    })();
+
+    queue.fail(new Error('boom'));
+
+    await expect(consume).rejects.toThrow('boom');
+    expect(completedNormally).toBe(false);
+  });
+
   it('ignores push() calls after finish()', async () => {
     const queue = new AsyncEventQueue<number>();
     const iterator = queue[Symbol.asyncIterator]();

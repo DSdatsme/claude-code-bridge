@@ -6,6 +6,7 @@ export type {
   ResultEvent,
   SessionInitEvent,
   WarningEvent,
+  ClaudeErrorEvent,
   ClaudeCodeOptions,
   PermissionMode,
   RunTaskResult,
