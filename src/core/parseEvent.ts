@@ -71,11 +71,18 @@ export function parseEvent(line: string): ClaudeEvent {
 
     case 'result': {
       if (typeof obj.session_id === 'string' && typeof obj.total_cost_usd === 'number') {
+        const subtype = typeof obj.subtype === 'string' ? obj.subtype : undefined;
+        // An errored turn is reported with the same shape as a successful one -
+        // it still carries a session id and a cost - so `is_error` and a
+        // non-"success" subtype are the only things that distinguish it.
+        const isError = obj.is_error === true || (subtype !== undefined && subtype !== 'success');
         return {
           type: 'result',
           sessionId: obj.session_id,
           costUsd: obj.total_cost_usd,
           text: typeof obj.result === 'string' ? obj.result : '',
+          isError,
+          ...(subtype === undefined ? {} : { subtype }),
         };
       }
       return { type: 'warning', message: 'Unrecognized result message shape', raw: line };

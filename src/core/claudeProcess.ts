@@ -3,7 +3,12 @@ import * as readline from 'node:readline';
 import { buildClaudeArgs } from './cliArgs.js';
 import { parseEvent } from './parseEvent.js';
 import { AsyncEventQueue } from './asyncEventQueue.js';
-import { ClaudeNotFoundError, ClaudeAuthError, ClaudeProcessError } from './errors.js';
+import {
+  ClaudeNotFoundError,
+  ClaudeAuthError,
+  ClaudeProcessError,
+  ClaudeResultError,
+} from './errors.js';
 import type { ClaudeCodeOptions, ClaudeEvent, ResultEvent } from './types.js';
 
 export interface ChildProcessLike {
@@ -102,8 +107,23 @@ export function startClaudeProcess(
       }
       queue.push(event);
       if (event.type === 'result') {
-        settled = true;
-        resolveResult(event);
+        if (event.isError) {
+          // The turn finished but the CLI flagged it as failed. Push the event
+          // first (queue.fail still drains what is buffered) so consumers can
+          // see the reported cost and session id, then fail rather than handing
+          // back a result that looks successful.
+          fail(
+            new ClaudeResultError({
+              sessionId: event.sessionId,
+              costUsd: event.costUsd,
+              text: event.text || partialText,
+              subtype: event.subtype,
+            })
+          );
+        } else {
+          settled = true;
+          resolveResult(event);
+        }
       }
     });
 

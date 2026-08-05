@@ -15,6 +15,17 @@ export const TOOL_RESULT_LINE =
 export const RESULT_LINE =
   '{"type":"result","subtype":"success","session_id":"sess_abc123","total_cost_usd":0.0123,"result":"Hello world"}';
 
+/**
+ * A failed turn. Note it carries the same `session_id` / `total_cost_usd` as a
+ * successful one - only `is_error` and the subtype distinguish it.
+ */
+export const ERROR_RESULT_LINE =
+  '{"type":"result","subtype":"error_during_execution","session_id":"sess_abc123","total_cost_usd":0.02,"is_error":true,"result":"tool execution failed"}';
+
+/** A failed turn signalled by subtype alone, with is_error absent. */
+export const MAX_TURNS_RESULT_LINE =
+  '{"type":"result","subtype":"error_max_turns","session_id":"sess_abc123","total_cost_usd":0.05,"result":""}';
+
 export const MALFORMED_LINE = 'not json at all {{{';
 
 export const UNRECOGNIZED_TYPE_LINE = '{"type":"some_future_event","foo":"bar"}';

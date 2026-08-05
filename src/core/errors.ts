@@ -20,6 +20,37 @@ export class ClaudeAuthError extends Error {
   }
 }
 
+/**
+ * The CLI completed the turn but reported it as failed (`is_error: true`, or a
+ * terminal subtype such as "error_max_turns" / "error_during_execution").
+ * Whatever the CLI did report - text, cost, session id - is attached, since an
+ * errored turn still costs money and still belongs to a resumable session.
+ */
+export class ClaudeResultError extends Error {
+  public readonly sessionId: string;
+  public readonly costUsd: number;
+  public readonly text: string;
+  public readonly subtype: string | undefined;
+
+  constructor(details: {
+    sessionId: string;
+    costUsd: number;
+    text: string;
+    subtype?: string;
+  }) {
+    super(
+      `Claude Code reported a failed turn` +
+      `${details.subtype ? ` (subtype "${details.subtype}")` : ''}.` +
+      `${details.text ? ` Reported output:\n${details.text}` : ''}`
+    );
+    this.name = 'ClaudeResultError';
+    this.sessionId = details.sessionId;
+    this.costUsd = details.costUsd;
+    this.text = details.text;
+    this.subtype = details.subtype;
+  }
+}
+
 export class ClaudeProcessError extends Error {
   public readonly partialText: string;
 

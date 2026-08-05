@@ -11,7 +11,12 @@ export type {
   PermissionMode,
   RunTaskResult,
 } from './types.js';
-export { ClaudeNotFoundError, ClaudeAuthError, ClaudeProcessError } from './errors.js';
+export {
+  ClaudeNotFoundError,
+  ClaudeAuthError,
+  ClaudeProcessError,
+  ClaudeResultError,
+} from './errors.js';
 export { checkClaudeCode, type VersionCheckResult } from './versionGuard.js';
 export { runTask, type RunTaskOptions } from './runTask.js';
 export { ClaudeSession } from './session.js';

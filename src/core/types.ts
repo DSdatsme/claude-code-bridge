@@ -22,6 +22,15 @@ export interface ResultEvent {
   sessionId: string;
   costUsd: number;
   text: string;
+  /**
+   * True when the CLI reported the turn as failed - `is_error: true`, or a
+   * terminal subtype other than "success" such as "error_max_turns" or
+   * "error_during_execution". Such a result still carries a cost and a session
+   * id, so it is only distinguishable by this field.
+   */
+  isError: boolean;
+  /** The CLI's own result subtype, e.g. "success" or "error_max_turns". */
+  subtype?: string;
 }
 
 export interface SessionInitEvent {
@@ -82,4 +91,11 @@ export interface RunTaskResult {
   sessionId: string;
   costUsd: number;
   toolCalls: ToolUseEvent[];
+  /**
+   * Whether the CLI flagged the turn as failed. `runTask` rejects with a
+   * `ClaudeResultError` in that case, so a resolved result normally has this
+   * false; it is carried through so the shape stays honest for callers that
+   * inspect a `ResultEvent` directly.
+   */
+  isError: boolean;
 }

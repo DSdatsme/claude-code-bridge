@@ -21,13 +21,15 @@ describe('startClaudeProcess', () => {
 
     expect(events).toEqual([
       { type: 'text_delta', text: 'hi' },
-      { type: 'result', sessionId: 'sess_1', costUsd: 0.01, text: 'hi' },
+      { type: 'result', sessionId: 'sess_1', costUsd: 0.01, text: 'hi', isError: false, subtype: 'success' },
     ]);
     await expect(handle.result).resolves.toEqual({
       type: 'result',
       sessionId: 'sess_1',
       costUsd: 0.01,
       text: 'hi',
+      isError: false,
+      subtype: 'success',
     });
   });
 
@@ -45,6 +47,8 @@ describe('startClaudeProcess', () => {
       sessionId: 'sess_2',
       costUsd: 0.02,
       text: 'done',
+      isError: false,
+      subtype: 'success',
     });
   });
 
@@ -144,6 +148,35 @@ describe('startClaudeProcess', () => {
 
     const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
     await expect(handle.result).rejects.toThrow(/no stdout stream/);
+  });
+
+  it('fails the turn when the CLI reports an errored result, but still emits the event', async () => {
+    const spawnFn: SpawnFn = () =>
+      fakeChild({
+        lines: [
+          '{"type":"result","subtype":"error_during_execution","session_id":"sess_e","total_cost_usd":0.03,"is_error":true,"result":"it broke"}',
+        ],
+      });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    await expect(handle.result).rejects.toMatchObject({
+      name: 'ClaudeResultError',
+      sessionId: 'sess_e',
+      costUsd: 0.03,
+      subtype: 'error_during_execution',
+    });
+
+    // The event itself is still delivered, so a UI can show the reported cost
+    // and the CLI's own message before the error lands.
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const event of handle.events) {
+          seen.push(event.type);
+        }
+      })()
+    ).rejects.toThrow(/failed turn/);
+    expect(seen).toEqual(['result']);
   });
 
   it('surfaces a failure through `events`, not only through `result`', async () => {

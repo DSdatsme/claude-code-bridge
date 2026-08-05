@@ -6,6 +6,8 @@ import {
   TOOL_USE_LINE,
   TOOL_RESULT_LINE,
   RESULT_LINE,
+  ERROR_RESULT_LINE,
+  MAX_TURNS_RESULT_LINE,
   MALFORMED_LINE,
   UNRECOGNIZED_TYPE_LINE,
 } from '../fixtures/stream-json-lines.js';
@@ -47,6 +49,26 @@ describe('parseEvent', () => {
       sessionId: 'sess_abc123',
       costUsd: 0.0123,
       text: 'Hello world',
+      isError: false,
+      subtype: 'success',
+    });
+  });
+
+  it('flags a result carrying is_error: true', () => {
+    expect(parseEvent(ERROR_RESULT_LINE)).toMatchObject({
+      type: 'result',
+      isError: true,
+      subtype: 'error_during_execution',
+      costUsd: 0.02,
+      sessionId: 'sess_abc123',
+    });
+  });
+
+  it('flags a result whose subtype is not "success" even without is_error', () => {
+    expect(parseEvent(MAX_TURNS_RESULT_LINE)).toMatchObject({
+      type: 'result',
+      isError: true,
+      subtype: 'error_max_turns',
     });
   });
 

@@ -21,6 +21,23 @@ describe('runTask', () => {
       sessionId: 'sess_1',
       costUsd: 0.05,
       toolCalls: [{ type: 'tool_use', toolUseId: 'toolu_1', toolName: 'Read', input: { file_path: 'a.txt' } }],
+      isError: false,
+    });
+  });
+
+  it('rejects with ClaudeResultError when the CLI reports a failed turn', async () => {
+    const spawnFn: SpawnFn = () =>
+      fakeChild([
+        '{"type":"result","subtype":"error_max_turns","session_id":"sess_9","total_cost_usd":0.07,"is_error":true,"result":"ran out of turns"}',
+      ]);
+
+    // Previously this resolved as a success, hiding the failure behind a normal
+    // looking RunTaskResult.
+    await expect(runTask('hello', {}, { spawnFn })).rejects.toMatchObject({
+      name: 'ClaudeResultError',
+      subtype: 'error_max_turns',
+      costUsd: 0.07,
+      sessionId: 'sess_9',
     });
   });
 

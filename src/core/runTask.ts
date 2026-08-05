@@ -27,5 +27,6 @@ export async function runTask(
     sessionId: result.sessionId,
     costUsd: result.costUsd,
     toolCalls,
+    isError: result.isError,
   };
 }
