@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { startClaudeProcess, type SpawnFn } from '../../src/core/claudeProcess.js';
-import { fakeChild } from '../fixtures/fakeChild.js';
+import { controlledFakeChild, fakeChild } from '../fixtures/fakeChild.js';
 
 describe('startClaudeProcess', () => {
   it('streams parsed events and resolves the result', async () => {
@@ -214,6 +214,41 @@ describe('startClaudeProcess', () => {
       })()
     ).rejects.toThrow(/exited without a result/);
     expect(seen).toEqual(['text_delta']);
+  });
+
+  it('kill() kills the child and settles the pending turn as cancelled', async () => {
+    const child = controlledFakeChild();
+    const handle = startClaudeProcess('hello', {}, undefined, () => child);
+
+    child.pushLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"thinking"}}}'
+    );
+    // Let the line be read before cancelling.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    handle.kill();
+
+    expect(child.killCount()).toBe(1);
+    await expect(handle.result).rejects.toMatchObject({
+      name: 'ClaudeProcessError',
+      partialText: 'thinking',
+    });
+  });
+
+  it('kill() is idempotent and a no-op once the turn already finished', async () => {
+    const child = fakeChild({
+      lines: [
+        '{"type":"result","subtype":"success","session_id":"sess_k","total_cost_usd":0,"result":"done"}',
+      ],
+    });
+    const handle = startClaudeProcess('hello', {}, undefined, () => child);
+    await handle.result;
+
+    handle.kill();
+    handle.kill();
+
+    expect(child.killCount()).toBe(0);
+    await expect(handle.result).resolves.toMatchObject({ text: 'done' });
   });
 
   it('does not produce an unhandled rejection when only `events` is consumed', async () => {

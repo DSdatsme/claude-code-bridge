@@ -81,6 +81,98 @@ describe('createClaudeRouteHandler', () => {
     );
   });
 
+  describe('cancellation', () => {
+    /**
+     * A turn that streams one event and then stays open, so the test controls
+     * when it ends - which is what a real turn still doing tool work looks like.
+     */
+    function openTurn() {
+      let kills = 0;
+      let release!: () => void;
+      const closed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      async function* events(): AsyncIterable<ClaudeEvent> {
+        yield { type: 'text_delta', text: 'working' };
+        await closed;
+      }
+
+      const stream = Object.assign(events(), {
+        kill: () => {
+          kills += 1;
+          release();
+        },
+      });
+
+      return { stream, killCount: () => kills };
+    }
+
+    it('kills the turn when the client aborts the request', async () => {
+      const turn = openTurn();
+      const handler = createClaudeRouteHandler(() => ({ send: () => turn.stream }));
+      const abort = new AbortController();
+
+      const response = await handler(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'hello' }),
+          signal: abort.signal,
+        })
+      );
+
+      const reader = response.body!.getReader();
+      await reader.read();
+      expect(turn.killCount()).toBe(0);
+
+      abort.abort();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      // Without this the `claude` process keeps running to completion on the
+      // server, spending tokens for output nobody will read.
+      expect(turn.killCount()).toBe(1);
+    });
+
+    it('kills the turn when the response stream is cancelled', async () => {
+      const turn = openTurn();
+      const handler = createClaudeRouteHandler(() => ({ send: () => turn.stream }));
+
+      const response = await handler(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'hello' }),
+        })
+      );
+
+      const reader = response.body!.getReader();
+      await reader.read();
+      await reader.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(turn.killCount()).toBe(1);
+    });
+
+    it('still works with a plain async generator that cannot be cancelled', async () => {
+      // SessionLike only promises an AsyncIterable, so cancellation is optional.
+      async function* events(): AsyncIterable<ClaudeEvent> {
+        yield { type: 'text_delta', text: 'hi' };
+      }
+      const handler = createClaudeRouteHandler(() => ({ send: () => events() }));
+      const abort = new AbortController();
+
+      const response = await handler(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: 'hello' }),
+          signal: abort.signal,
+        })
+      );
+      abort.abort();
+
+      await expect(readAllChunks(response)).resolves.toBeTypeOf('string');
+    });
+  });
+
   it('returns a 400 response when the request body has no prompt', async () => {
     const handler = createClaudeRouteHandler(() => ({
       send: async function* () {},

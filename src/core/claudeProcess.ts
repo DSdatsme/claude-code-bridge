@@ -16,6 +16,11 @@ export interface ChildProcessLike {
   stdout: NodeJS.ReadableStream | null;
   stderr: NodeJS.ReadableStream | null;
   on(event: 'error', listener: (err: NodeJS.ErrnoException) => void): void;
+  on(
+    event: 'close',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void
+  ): void;
+  kill(): void;
 }
 
 export type SpawnFn = (
@@ -27,6 +32,14 @@ export type SpawnFn = (
 export interface ClaudeProcessHandle {
   events: AsyncIterable<ClaudeEvent>;
   result: Promise<ResultEvent>;
+  /**
+   * Kills the child and settles the turn as cancelled. Safe to call more than
+   * once, and a no-op once the turn has already finished. Without this, an
+   * abandoned turn - a browser that disconnected, a consumer that stopped
+   * iterating - runs to completion on the server, spending tokens for output
+   * nobody reads.
+   */
+  kill(): void;
 }
 
 const nodeSpawn: SpawnFn = (command, args, options) =>
@@ -82,6 +95,23 @@ export function startClaudeProcess(
     // fail(), not finish(): finishing would complete the iteration normally and
     // the failure would never reach anyone consuming only `events`.
     queue.fail(error);
+  }
+
+  let killed = false;
+  function kill(): void {
+    if (killed || settled) return;
+    killed = true;
+    try {
+      child.kill();
+    } catch {
+      // The process is already gone; the pending turn still needs settling.
+    }
+    fail(
+      new ClaudeProcessError(
+        'Claude process was cancelled before it produced a result',
+        partialText
+      )
+    );
   }
 
   child.on('error', (err: NodeJS.ErrnoException) => {
@@ -151,5 +181,5 @@ export function startClaudeProcess(
     fail(new ClaudeProcessError('Claude process produced no stdout stream', partialText));
   }
 
-  return { events: queue, result };
+  return { events: queue, result, kill };
 }

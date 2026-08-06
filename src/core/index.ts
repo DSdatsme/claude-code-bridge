@@ -8,6 +8,7 @@ export type {
   WarningEvent,
   ClaudeErrorEvent,
   ClaudeCodeOptions,
+  ClaudeEventStream,
   PermissionMode,
   RunTaskResult,
 } from './types.js';

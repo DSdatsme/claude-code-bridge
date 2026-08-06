@@ -4,6 +4,10 @@ export interface SessionLike {
   send(prompt: string): AsyncIterable<ClaudeEvent>;
 }
 
+interface Cancellable {
+  kill(): void;
+}
+
 /**
  * Prepares an event for the wire. `warning.raw` carries the raw CLI line it came
  * from, which can contain anything the subprocess printed - including file
@@ -32,11 +36,34 @@ export function createClaudeRouteHandler(
     const session = await getSession(req);
     const events = session.send(body.prompt);
 
+    // `SessionLike` only promises an AsyncIterable, so that a plain async
+    // generator still satisfies it. A ClaudeSession additionally returns a
+    // cancellable stream; use that when it is there.
+    const cancel = (events as Partial<Cancellable>).kill;
+    const cancelTurn = (): void => {
+      if (typeof cancel === 'function') cancel.call(events);
+    };
+
+    // A disconnected client must not leave `claude` running on the server.
+    let writable = true;
+    const onAbort = (): void => {
+      writable = false;
+      cancelTurn();
+    };
+    req.signal?.addEventListener('abort', onAbort, { once: true });
+
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const encoder = new TextEncoder();
         const send = (event: unknown): void => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          if (!writable) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          } catch {
+            // The consumer went away between events; stop writing to a stream
+            // that is no longer accepting data.
+            writable = false;
+          }
         };
         try {
           for await (const event of events) {
@@ -52,8 +79,20 @@ export function createClaudeRouteHandler(
             message: error instanceof Error ? error.message : String(error),
           } satisfies ClaudeErrorEvent);
         } finally {
-          controller.close();
+          req.signal?.removeEventListener('abort', onAbort);
+          // Always attempt to close: anything still reading needs to see the end
+          // of the stream. Throws only if the consumer already tore it down.
+          try {
+            controller.close();
+          } catch {
+            // already closed or cancelled by the consumer
+          }
         }
+      },
+      cancel() {
+        // The browser closed the connection.
+        writable = false;
+        cancelTurn();
       },
     });
 

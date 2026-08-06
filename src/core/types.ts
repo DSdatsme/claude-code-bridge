@@ -70,6 +70,16 @@ export type ClaudeEvent =
   | WarningEvent
   | ClaudeErrorEvent;
 
+/**
+ * An event stream for one turn that can also be cancelled. Cancelling kills the
+ * underlying `claude` process, which matters on a persistent server: an
+ * abandoned turn otherwise runs to completion, spending tokens for output nobody
+ * will read.
+ */
+export interface ClaudeEventStream extends AsyncIterable<ClaudeEvent> {
+  kill(): void;
+}
+
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 
 export interface ClaudeCodeOptions {

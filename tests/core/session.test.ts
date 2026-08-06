@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ClaudeSession } from '../../src/core/session.js';
 import type { SpawnFn } from '../../src/core/claudeProcess.js';
-import { fakeChild as makeFakeChild } from '../fixtures/fakeChild.js';
+import { controlledFakeChild, fakeChild as makeFakeChild } from '../fixtures/fakeChild.js';
 
 const fakeChild = (lines: string[]) => makeFakeChild({ lines });
 
@@ -40,5 +40,38 @@ describe('ClaudeSession', () => {
     await drain(session.send('second prompt'));
     expect(calls[1]).toContain('--resume');
     expect(calls[1][calls[1].indexOf('--resume') + 1]).toBe('sess_42');
+  });
+
+  it('kills the child when a consumer stops iterating early', async () => {
+    const child = controlledFakeChild();
+    const session = new ClaudeSession({}, { spawnFn: () => child });
+
+    child.pushLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"one"}}}'
+    );
+
+    for await (const _event of session.send('hello')) {
+      break; // consumer loses interest after the first event
+    }
+
+    expect(child.killCount()).toBe(1);
+  });
+
+  it('exposes kill() so a caller can cancel a turn it is still iterating', async () => {
+    const child = controlledFakeChild();
+    const session = new ClaudeSession({}, { spawnFn: () => child });
+
+    const stream = session.send('hello');
+    stream.kill();
+
+    expect(child.killCount()).toBe(1);
+    // The abandoned turn surfaces as a cancellation rather than hanging.
+    await expect(
+      (async () => {
+        for await (const _event of stream) {
+          // drain
+        }
+      })()
+    ).rejects.toThrow(/cancelled/);
   });
 });
