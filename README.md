@@ -29,17 +29,25 @@ console.log(result.text, result.costUsd);
 
 ```typescript
 // app/api/chat/route.ts
-import { createClaudeRouteHandler } from 'claude-code-bridge/next';
+import { createClaudeRouteHandler, conversationIdFrom } from 'claude-code-bridge/next';
 import { ClaudeSession } from 'claude-code-bridge';
 
+// The library never persists a session-to-conversation mapping — that's your
+// app's job. A Map is fine for one process; use your own store if you need more.
 const sessions = new Map<string, ClaudeSession>();
 
 export const POST = createClaudeRouteHandler((req) => {
-  const conversationId = req.headers.get('x-conversation-id') ?? 'default';
-  if (!sessions.has(conversationId)) {
-    sessions.set(conversationId, new ClaudeSession());
+  const conversationId = conversationIdFrom(req) ?? 'default';
+  let session = sessions.get(conversationId);
+  if (!session) {
+    session = new ClaudeSession({
+      // Scope what Claude may do on your server — see Security below.
+      allowedTools: ['Read', 'Grep', 'Glob'],
+      cwd: process.env.CLAUDE_WORKSPACE,
+    });
+    sessions.set(conversationId, session);
   }
-  return sessions.get(conversationId)!;
+  return session;
 });
 ```
 
@@ -48,8 +56,15 @@ export const POST = createClaudeRouteHandler((req) => {
 'use client';
 import { useClaudeChat } from 'claude-code-bridge/next';
 
-export default function ChatPage() {
-  const { messages, isStreaming, sendMessage } = useClaudeChat({ api: '/api/chat' });
-  // render messages, call sendMessage(text) on submit
+export default function ChatPage({ conversationId }: { conversationId: string }) {
+  const { messages, isStreaming, error, sendMessage } = useClaudeChat({
+    api: '/api/chat',
+    // Sent as the x-conversation-id header, which the route handler above reads
+    // to pick this conversation's session. Omit it and every client shares one.
+    conversationId,
+  });
+  // render messages, show `error` if set, call sendMessage(text) on submit
 }
 ```
+
+`useClaudeChat` also accepts `headers` (e.g. an auth token for your chat route) and `body` (extra JSON fields merged alongside `prompt`).

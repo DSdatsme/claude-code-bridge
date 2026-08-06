@@ -40,6 +40,47 @@ describe('useClaudeChat', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('sends the conversation id, extra headers and extra body fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() =>
+      useClaudeChat({
+        api: '/api/chat',
+        conversationId: 'conv_42',
+        headers: { Authorization: 'Bearer token' },
+        body: { projectId: 'proj_1' },
+      })
+    );
+
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/chat');
+    expect(init.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      // The route handler reads this to pick the right ClaudeSession; without it
+      // every client shares one conversation on the server.
+      'x-conversation-id': 'conv_42',
+      Authorization: 'Bearer token',
+    });
+    expect(JSON.parse(init.body)).toEqual({ prompt: 'hi', projectId: 'proj_1' });
+  });
+
+  it('omits the conversation header when no conversationId is configured', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useClaudeChat({ api: '/api/chat' }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-conversation-id');
+  });
+
   it('surfaces a fetch failure as `error` without throwing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
 

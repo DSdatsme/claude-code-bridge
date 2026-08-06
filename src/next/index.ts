@@ -1,4 +1,5 @@
 export { createClaudeRouteHandler, type SessionLike } from './routeHandler.js';
+export { CONVERSATION_ID_HEADER, conversationIdFrom } from './conversation.js';
 export {
   useClaudeChat,
   ClaudeChatError,

@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { ClaudeEvent } from '../core/types.js';
+import { CONVERSATION_ID_HEADER } from './conversation.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -8,6 +9,16 @@ export interface ChatMessage {
 
 export interface UseClaudeChatOptions {
   api: string;
+  /**
+   * Identifies which conversation this chat belongs to. Sent as the
+   * `x-conversation-id` header, which a route handler reads to pick the right
+   * `ClaudeSession`. Without it every client shares one session on the server.
+   */
+  conversationId?: string;
+  /** Extra request headers, e.g. an auth token for the chat route. */
+  headers?: Record<string, string>;
+  /** Extra JSON fields to merge into the request body alongside `prompt`. */
+  body?: Record<string, unknown>;
 }
 
 export interface UseClaudeChatResult {
@@ -62,8 +73,14 @@ export function useClaudeChat(options: UseClaudeChatOptions): UseClaudeChatResul
       try {
         const response = await fetch(options.api, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text }),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.conversationId
+              ? { [CONVERSATION_ID_HEADER]: options.conversationId }
+              : {}),
+            ...options.headers,
+          },
+          body: JSON.stringify({ ...options.body, prompt: text }),
         });
 
         // A non-2xx response is a plain JSON or HTML error, not an SSE stream.
@@ -123,7 +140,7 @@ export function useClaudeChat(options: UseClaudeChatOptions): UseClaudeChatResul
         setIsStreaming(false);
       }
     },
-    [options.api]
+    [options.api, options.conversationId, options.headers, options.body]
   );
 
   return { messages, isStreaming, error, sendMessage };
