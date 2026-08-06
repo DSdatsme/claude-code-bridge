@@ -40,6 +40,12 @@ export interface ClaudeProcessHandle {
    * nobody reads.
    */
   kill(): void;
+  /**
+   * The session id as soon as the CLI reports it, which is at the *start* of the
+   * turn (its `init` message) rather than only on success. A turn that fails
+   * half way still belongs to a real, resumable conversation.
+   */
+  readonly sessionId: string | undefined;
 }
 
 const nodeSpawn: SpawnFn = (command, args, options) =>
@@ -70,6 +76,7 @@ export function startClaudeProcess(
 
   const queue = new AsyncEventQueue<ClaudeEvent>();
   let partialText = '';
+  let sessionId: string | undefined;
   const stderrChunks: string[] = [];
   let settled = false;
 
@@ -138,6 +145,9 @@ export function startClaudeProcess(
       if (event.type === 'text_delta') {
         partialText += event.text;
       }
+      if (event.type === 'session_init' || event.type === 'result') {
+        sessionId = event.sessionId;
+      }
       queue.push(event);
       if (event.type === 'result') {
         if (event.isError) {
@@ -181,5 +191,12 @@ export function startClaudeProcess(
     fail(new ClaudeProcessError('Claude process produced no stdout stream', partialText));
   }
 
-  return { events: queue, result, kill };
+  return {
+    events: queue,
+    result,
+    kill,
+    get sessionId(): string | undefined {
+      return sessionId;
+    },
+  };
 }

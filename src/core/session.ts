@@ -27,14 +27,26 @@ export class ClaudeSession {
         // nothing further to do with the session's internal state here.
       });
 
+    const session = this;
     let drained = false;
     async function* observe(): AsyncGenerator<ClaudeEvent> {
       try {
         for await (const event of handle.events) {
+          // Adopt the id the moment the CLI reports it, not just on success.
+          // Capturing it only from a successful result meant that a turn which
+          // failed - notably on expired credentials, which the CLI hits every
+          // 8-12h - left the session with no id, so the next send() silently
+          // started a brand new conversation with none of the history.
+          if (event.type === 'session_init') {
+            session.currentSessionId = event.sessionId;
+          }
           yield event;
         }
         drained = true;
       } finally {
+        if (handle.sessionId) {
+          session.currentSessionId = handle.sessionId;
+        }
         // Reached either because the turn ended or because the consumer stopped
         // early (`break`, or an error thrown in the loop body). In the latter
         // case the child is still running and nobody is reading it, so kill it.
