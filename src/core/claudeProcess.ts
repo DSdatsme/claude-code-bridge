@@ -51,6 +51,24 @@ export interface ClaudeProcessHandle {
 const nodeSpawn: SpawnFn = (command, args, options) =>
   defaultSpawn(command, args, { cwd: options.cwd }) as unknown as ChildProcessLike;
 
+/**
+ * Recognises stderr that reports a credential problem, which is a routine and
+ * recurring condition rather than a crash: subscription OAuth tokens expire
+ * every 8-12 hours on a persistent server.
+ *
+ * Deliberately specific. A bare /auth/ test matches the substring in "author",
+ * "authored" and any path containing it, which reported unrelated crashes as
+ * expired credentials and sent the operator off to re-run `claude login`.
+ */
+function looksLikeAuthFailure(stderr: string): boolean {
+  return /\b(?:not logged in|logged out|please (?:run )?(?:re-?)?log ?in|claude login|unauthorized|invalid api key|invalid[ -]?token|authentication (?:failed|error|required)|credentials? (?:expired|invalid|missing)|token (?:expired|invalid)|oauth|401)\b/i.test(
+    stderr
+  );
+}
+
+/** How long to wait for the child's own 'close' after stdout ends. */
+const CHILD_CLOSE_GRACE_MS = 50;
+
 export function startClaudeProcess(
   prompt: string,
   options: ClaudeCodeOptions,
@@ -133,6 +151,67 @@ export function startClaudeProcess(
     stderrChunks.push(chunk.toString());
   });
 
+  let stdoutEnded = false;
+  let childClosed = false;
+  let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  child.on('close', (code, signal) => {
+    childClosed = true;
+    exitCode = code;
+    exitSignal = signal;
+    maybeEnd();
+  });
+
+  function endOfOutput(): void {
+    if (graceTimer !== undefined) {
+      clearTimeout(graceTimer);
+      graceTimer = undefined;
+    }
+
+    const stderr = stderrChunks.join('');
+    if (looksLikeAuthFailure(stderr)) {
+      fail(new ClaudeAuthError(stderr));
+      return;
+    }
+
+    const how = exitSignal
+      ? `was terminated by ${exitSignal}`
+      : exitCode === null
+        ? 'exited'
+        : `exited with code ${exitCode}`;
+    fail(
+      new ClaudeProcessError(
+        `Claude process ${how} without a result message. stderr: ${stderr}`,
+        partialText
+      )
+    );
+  }
+
+  /**
+   * Decides the outcome once output is finished. Classification waits for the
+   * child's own 'close', which fires only after every stdio stream has closed -
+   * stdout closing on its own says nothing about whether stderr has drained, so
+   * classifying there could miss the very message that explains the failure.
+   * The grace timer keeps a child that never reports its exit from hanging.
+   */
+  function maybeEnd(): void {
+    if (settled) {
+      // The turn already produced its result; just end the event stream.
+      queue.finish();
+      return;
+    }
+    if (stdoutEnded && childClosed) {
+      endOfOutput();
+      return;
+    }
+    if ((stdoutEnded || childClosed) && graceTimer === undefined) {
+      graceTimer = setTimeout(endOfOutput, CHILD_CLOSE_GRACE_MS);
+      graceTimer.unref?.();
+    }
+  }
+
   if (child.stdout) {
     const rl = readline.createInterface({ input: child.stdout });
 
@@ -171,21 +250,8 @@ export function startClaudeProcess(
     });
 
     rl.on('close', () => {
-      if (!settled) {
-        const stderr = stderrChunks.join('');
-        if (/auth|unauthorized|login/i.test(stderr)) {
-          fail(new ClaudeAuthError(stderr));
-        } else {
-          fail(
-            new ClaudeProcessError(
-              `Claude process exited without a result message. stderr: ${stderr}`,
-              partialText
-            )
-          );
-        }
-      } else {
-        queue.finish();
-      }
+      stdoutEnded = true;
+      maybeEnd();
     });
   } else {
     fail(new ClaudeProcessError('Claude process produced no stdout stream', partialText));

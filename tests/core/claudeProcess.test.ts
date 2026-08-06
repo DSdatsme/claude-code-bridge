@@ -212,8 +212,59 @@ describe('startClaudeProcess', () => {
           seen.push(event.type);
         }
       })()
-    ).rejects.toThrow(/exited without a result/);
+    ).rejects.toThrow(/without a result/);
     expect(seen).toEqual(['text_delta']);
+  });
+
+  it('reports the exit code when the process ends without a result', async () => {
+    const spawnFn: SpawnFn = () => fakeChild({ lines: [], stderr: 'boom', exitCode: 3 });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    await expect(handle.result).rejects.toThrow(/exited with code 3/);
+  });
+
+  it('does not mistake stderr merely containing "author" for an auth failure', async () => {
+    // The old /auth|unauthorized|login/i test matched the substring in "author",
+    // so unrelated crashes told the operator to re-run `claude login`.
+    const spawnFn: SpawnFn = () =>
+      fakeChild({ lines: [], stderr: 'Error: file authored by another process; aborting', exitCode: 1 });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    await expect(handle.result).rejects.toMatchObject({ name: 'ClaudeProcessError' });
+  });
+
+  it('still classifies a genuine auth failure', async () => {
+    const spawnFn: SpawnFn = () =>
+      fakeChild({ lines: [], stderr: 'OAuth token expired. Please run `claude login`.', exitCode: 1 });
+    const handle = startClaudeProcess('hello', {}, undefined, spawnFn);
+
+    await expect(handle.result).rejects.toMatchObject({ name: 'ClaudeAuthError' });
+  });
+
+  it('classifies using stderr that only arrives after stdout has closed', async () => {
+    // stdout closing says nothing about whether stderr has drained. Classifying
+    // at that moment could miss the very message explaining the failure, so the
+    // decision waits for the child's own 'close'.
+    const child = controlledFakeChild({ exitCode: 1 });
+    const handle = startClaudeProcess('hello', {}, undefined, () => child);
+
+    child.endStdout();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    child.pushStderr('Invalid API key. Please run `claude login`.');
+    child.endStderr();
+
+    await expect(handle.result).rejects.toMatchObject({ name: 'ClaudeAuthError' });
+  });
+
+  it('does not hang when a child never reports its exit', async () => {
+    const child = controlledFakeChild({ neverClose: true });
+    const handle = startClaudeProcess('hello', {}, undefined, () => child);
+
+    child.pushStderr('something went wrong');
+    child.endStderr();
+    child.endStdout();
+
+    await expect(handle.result).rejects.toMatchObject({ name: 'ClaudeProcessError' });
   });
 
   it('kill() kills the child and settles the pending turn as cancelled', async () => {

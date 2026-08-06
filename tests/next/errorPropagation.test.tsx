@@ -77,7 +77,7 @@ describe('error propagation: core -> ClaudeSession -> SSE route handler -> useCl
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: 'partial answer' },
     ]);
-    expect(result.current.error?.message).toMatch(/exited without a result/);
+    expect(result.current.error?.message).toMatch(/without a result/);
   });
 
   it('surfaces the route handler\'s own 400 instead of swallowing it', async () => {

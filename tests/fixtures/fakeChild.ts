@@ -32,7 +32,8 @@ interface FakeChildInternals {
 
 function baseFakeChild(
   opts: FakeChildOptions,
-  stdout: NodeJS.ReadableStream | null
+  stdout: NodeJS.ReadableStream | null,
+  stderrStream?: NodeJS.ReadableStream
 ): FakeChildInternals {
   const emitter = new EventEmitter();
   const child = emitter as unknown as FakeChild;
@@ -50,7 +51,8 @@ function baseFakeChild(
     },
   });
 
-  const stderr = Readable.from(opts.stderr ? [opts.stderr] : [], { objectMode: false });
+  const stderr =
+    stderrStream ?? Readable.from(opts.stderr ? [opts.stderr] : [], { objectMode: false });
 
   let kills = 0;
   Object.assign(child, {
@@ -105,18 +107,25 @@ export interface ControlledFakeChild extends FakeChild {
   pushLine(line: string): void;
   /** End stdout, as a child that finished its output would. */
   endStdout(): void;
+  /** Write to stderr - possibly after stdout has already ended. */
+  pushStderr(text: string): void;
+  endStderr(): void;
 }
 
 /**
  * A fake child that stays open until the test drives it, so mid-stream
- * behaviour (client disconnects, cancellation) can be exercised.
+ * behaviour (client disconnects, cancellation, stderr arriving after stdout has
+ * closed) can be exercised.
  */
 export function controlledFakeChild(opts: FakeChildOptions = {}): ControlledFakeChild {
   const stdout = new PassThrough();
-  const child = baseFakeChild(opts, stdout).child as ControlledFakeChild;
+  const stderr = new PassThrough();
+  const child = baseFakeChild(opts, stdout, stderr).child as ControlledFakeChild;
   Object.assign(child, {
     pushLine: (line: string) => stdout.write(line + '\n'),
     endStdout: () => stdout.end(),
+    pushStderr: (text: string) => stderr.write(text),
+    endStderr: () => stderr.end(),
   });
   return child;
 }
