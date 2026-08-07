@@ -25,6 +25,7 @@
   "types": "./dist/core/index.d.ts",
   "files": ["dist"],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
