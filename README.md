@@ -19,13 +19,13 @@ Also note: OAuth tokens on a persistent server expire roughly every 8-12 hours. 
 ## Install
 
 ```bash
-npm install claude-code-bridge
+npm install @dsdatsme/claude-code-bridge
 ```
 
 ## Background task usage
 
 ```typescript
-import { runTask } from 'claude-code-bridge';
+import { runTask } from '@dsdatsme/claude-code-bridge';
 
 const result = await runTask('Summarize this repository\'s README');
 console.log(result.text, result.costUsd);
@@ -35,8 +35,8 @@ console.log(result.text, result.costUsd);
 
 ```typescript
 // app/api/chat/route.ts
-import { createClaudeRouteHandler, conversationIdFrom } from 'claude-code-bridge/next';
-import { ClaudeSession } from 'claude-code-bridge';
+import { createClaudeRouteHandler, conversationIdFrom } from '@dsdatsme/claude-code-bridge/next';
+import { ClaudeSession } from '@dsdatsme/claude-code-bridge';
 
 // The library never persists a session-to-conversation mapping — that's your
 // app's job. A Map is fine for one process; use your own store if you need more.
@@ -60,7 +60,7 @@ export const POST = createClaudeRouteHandler((req) => {
 ```tsx
 // app/chat/page.tsx
 'use client';
-import { useClaudeChat } from 'claude-code-bridge/next';
+import { useClaudeChat } from '@dsdatsme/claude-code-bridge/next';
 
 export default function ChatPage({ conversationId }: { conversationId: string }) {
   const { messages, isStreaming, error, sendMessage } = useClaudeChat({
@@ -100,7 +100,7 @@ Turns fail in ordinary, recurring ways — an expired token is the common one �
 | `ClaudeProcessError` | The process died, produced no result, or was cancelled. Carries `partialText`, whatever had streamed before the failure. |
 
 ```typescript
-import { runTask, ClaudeAuthError } from 'claude-code-bridge';
+import { runTask, ClaudeAuthError } from '@dsdatsme/claude-code-bridge';
 
 try {
   await runTask('...');
@@ -116,7 +116,7 @@ try {
 Useful at startup to fail loudly rather than on the first request:
 
 ```typescript
-import { checkClaudeCode } from 'claude-code-bridge';
+import { checkClaudeCode } from '@dsdatsme/claude-code-bridge';
 
 const check = await checkClaudeCode();
 // { installed: true, version: '2.1.222' } | { installed: false, warning: '...' }

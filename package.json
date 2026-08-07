@@ -1,9 +1,16 @@
 {
-  "name": "claude-code-bridge",
+  "name": "@dsdatsme/claude-code-bridge",
   "version": "0.1.0",
   "description": "A Node.js/Next.js wrapper around the Claude Code CLI for personal-scale AI integrations using your own Claude Code authentication.",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DSdatsme/claude-code-bridge.git"
+  },
   "exports": {
     ".": {
       "types": "./dist/core/index.d.ts",
